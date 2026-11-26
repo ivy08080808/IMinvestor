@@ -1,6 +1,6 @@
 # IMinvestor 實作計畫書（前後端 + 爬蟲 + 開盤時間）
 
-> 版本：2026-11-19 v3　｜　依據：課程規格《DB115-1_project.pdf》、第 10 組《專案計劃書》
+> 版本：2026-11-26 v5　｜　依據：課程規格《DB115-1_project.pdf》、第 10 組《專案計劃書》
 > 狀態：**待確認**（確認後才開始寫程式）
 >
 > v2 修改：移除模擬時鐘與 Admin「手動匯入並結算」；改為**每個交易日 15:00 全自動抓取一次行情並結算**。Demo 以歷史紀錄呈現。
@@ -9,6 +9,7 @@
 > 1. 新增第 11 張表 `SETTLEMENT_RUN`（每日自動結算紀錄）：15:00 抓取失敗時當日沒有行情，無法再用「當日有無行情」判斷是否已結算；此表同時是「每天只跑一次」的保證。
 > 2. 前端改用 Vue 3 CDN（免 Node.js 建置），本機沒有 Docker，改為直接使用本機 PostgreSQL。
 > 3. 分工改為四個模組（A 行情與爬蟲、B 交易核心、C 帳務與管理、D 前端／NoSQL／分析），見 `docs/TASKS.md`。
+> v5：`DAILY_PRICE` 新增 `open_price`（TWSE 真實開盤價）；前一交易日收盤價改稱「昨收（參考價）」`prev_close`，仍以 LAG 推算，作為漲跌、±10% 限制與今日損益的基準（§2）。
 
 ---
 
@@ -16,11 +17,11 @@
 
 | # | 變更 | 影響範圍 |
 |---|------|----------|
-| 1 | **開盤價 = 前一交易日收盤價**（不新增欄位，查詢時以 window function 推算） | 行情 API、前端行情頁、報告 1.1.2 第 2 點 |
+| 1 | **開盤價存真實值；昨收（參考價）= 前一交易日收盤價**（`DAILY_PRICE` 新增 `open_price`，昨收以 window function 推算） | Schema、爬蟲、行情 API、前端行情頁、報告 1.1.2 與資料字典 |
 | 2 | **爬蟲**：自 TWSE 抓取證券清單、每日行情、休市日 | 新增 `crawler/` 模組、回補腳本、每日排程 |
 | 3 | **開盤時間感知＋全自動結算**：系統依台北時間判斷市場狀態與委託歸屬日；每個交易日 15:00 自動抓一次行情並結算，無任何手動步驟 | 新增 `clock` / `market` 模組、排程器、前端狀態列 |
 
-Schema 維持報告中的 10 張表，**不需改表結構**即可完成以上三點；唯一的 schema 修改是第 7 節的 FK 刪除動作（Cascade → Restrict），不增減任何欄位。
+Schema 相對報告的修改：`DAILY_PRICE` 新增 `open_price`（§2）、使用者相關 FK 刪除動作改 Restrict（§7）、新增 `SETTLEMENT_RUN`（v4）。
 
 ---
 
@@ -38,31 +39,37 @@ Schema 維持報告中的 10 張表，**不需改表結構**即可完成以上�
 
 ---
 
-## 2. 變更一：開盤價以前一交易日收盤價顯示
+## 2. 變更一：開盤價與參考價（v5 修訂）
 
 ### 2.1 定義
 
-令證券 $s$ 的行情序列依交易日排序為 $d_1 < d_2 < \dots < d_n$（只含 `DAILY_PRICE` 有資料的日子，即停牌日自動跳過），定義
+兩個不同的值，**不可混用**：
+
+| 名稱 | API 欄位 | 來源 | 用途 |
+|---|---|---|---|
+| 開盤價 | `open_price` | TWSE 當日真實開盤價，爬蟲匯入、**存在 `DAILY_PRICE`** | 行情頁顯示 |
+| 昨收（參考價） | `prev_close` | 前一交易日收盤價，以 `LAG()` 推算、**不存** | 漲跌、±10% 下單限制、今日損益 |
+
+令證券 $s$ 的行情序列依交易日排序為 $d_1 < d_2 < \dots < d_n$（只含 `DAILY_PRICE` 有資料的日子，停牌日自動跳過）：
 
 $$
-\text{Open}(s, d_k) = \text{Close}(s, d_{k-1}),\qquad \text{Change}(s, d_k) = \text{Close}(s, d_k) - \text{Close}(s, d_{k-1})
+\text{PrevClose}(s, d_k) = \text{Close}(s, d_{k-1}),\qquad
+\text{Change}(s, d_k) = \text{Close}(s, d_k) - \text{PrevClose}(s, d_k)
 $$
 
-$k=1$（第一筆行情）時開盤價顯示 `—`。此定義與報告中「今日損益」「±10% 委託價限制」所用的「前一筆行情收盤價」**是同一個值**，三者一致。
-
-> 註：TWSE 原始資料其實有開盤價，但我們刻意不存，避免與「前一筆收盤」兩種基準混用。前端欄位標示為「開盤價（參考價）」並加 tooltip 說明。
+$k=1$ 時昨收顯示 `—`。使用者在交易日 $d$ 看到的最新行情是前一交易日的資料（含該日真實開盤價）；$d$ 下單時的參考價＝前一交易日收盤價，與 `market.reference_price` 為同一個值。
 
 ### 2.2 SQL
 
 **個股歷史行情**（先算 window 再篩日期，否則區間第一天的 LAG 會是 NULL）：
 
 ```sql
-SELECT trade_date, open_price, high_price, low_price, close_price, volume,
-       close_price - open_price AS change,
-       ROUND((close_price - open_price) / open_price * 100, 2) AS change_pct
+SELECT trade_date, prev_close, open_price, high_price, low_price, close_price, volume,
+       close_price - prev_close AS change,
+       ROUND((close_price - prev_close) / prev_close * 100, 2) AS change_pct
 FROM (
-    SELECT trade_date, high_price, low_price, close_price, volume,
-           LAG(close_price) OVER (PARTITION BY security_id ORDER BY trade_date) AS open_price
+    SELECT trade_date, open_price, high_price, low_price, close_price, volume,
+           LAG(close_price) OVER (PARTITION BY security_id ORDER BY trade_date) AS prev_close
     FROM daily_price
     WHERE security_id = %(sid)s
 ) t
@@ -73,9 +80,13 @@ ORDER BY trade_date DESC;
 **行情列表／自選股（每檔取最新兩筆）**：用 `LATERAL ... ORDER BY trade_date DESC LIMIT 2`，走 PK `(security_id, trade_date)` 的 index backward scan。
 複雜度：$m$ 檔證券為 $O(m \log N)$（$N$ 為 `DAILY_PRICE` 筆數），不需掃全表。
 
-### 2.3 報告需同步修改的文字
+### 2.3 報告需同步修改的地方
 
-1.1.2 第 2 點改為：「……查看當日行情與歷史行情，包括開盤價（以前一交易日收盤價顯示）、最高價、最低價、收盤價、成交量與漲跌。」
+- 1.1.2 第 2 點：「……查看當日行情與歷史行情，包括開盤價、最高價、最低價、收盤價、成交量與漲跌（漲跌以前一交易日收盤價為基準）。」
+- ER diagram：`DAILY_PRICE` 加上屬性 `Open_price`。
+- Relational schema 圖與表 9（`DAILY_PRICE` 資料字典）：加一列 `Open_price｜開盤價｜numeric(10,2)｜Not Null｜> 0`，並註明 `Low_price ≤ Open_price ≤ High_price`。
+- 表 11（FD）：`(Security_id, Trade_date) → {Open_price, High_price, Low_price, Close_price, Volume}`；正規化結論不變（仍為 BCNF）。
+- 2.2 節文字：「……記錄開盤價（Open_price）、最高價……；前一交易日收盤價（參考價）可由前一筆行情推得，故不另外儲存。」
 
 ---
 
@@ -134,7 +145,7 @@ ORDER BY trade_date DESC;
 | 交易日 $d$ 15:00 前 | 行情最新為前一交易日；委託歸屬 $d$ |
 | $d$ 15:00 | 系統自動抓 $d$ 的行情 → 結算 $d$ 的委託（約數秒至一分鐘） |
 | $d$ 15:00 結算完成後 | 可查到 $d$ 的行情、成交結果、更新後的庫存與資金；新委託歸屬下一交易日 |
-| 下一交易日 $d'$ | 行情頁「開盤價（參考價）」= $d$ 的收盤價；±10% 限制也以此為基準 |
+| 下一交易日 $d'$ | 行情頁最新行情為 $d$（含 $d$ 的真實開盤價）；昨收（參考價）= $d$ 的收盤價，±10% 限制以此為基準 |
 
 **Demo 方式**：以歷史紀錄呈現，不現場觸發結算。回補的真實歷史行情（2026 起）＋以結算引擎在歷史行情上重播產生的使用者委託／成交／持股（見第 6 節），讓助教可直接瀏覽各交易日的行情、委託成交結果與損益變化。現場可示範下單、取消、併行控制；該委託會在當日（或下一交易日）15:00 自動結算。
 
@@ -232,7 +243,7 @@ def belong_date(t: datetime) -> date:
 | 規格要求 | 計畫 |
 |---|---|
 | NoSQL 資料庫 + 至少一項分析 | MongoDB `behavior_events`：`{user_id, type: search/view_security/login, security_id, query, ts}`；index `{type, ts}`、`{security_id, ts}`。分析：**「瀏覽→下單轉換率」**——近 7 日瀏覽次數 Top 20 證券 vs. 實際委託數 |
-| ≥ 10 個功能的 SQL（≥5 使用者／業務、≥5 分析，≥1 用到 NoSQL） | 業務：下單、取消、結算、庫存損益、行情（含開盤價推算）、凍結帳戶。分析：個股成交統計與委託成交率、使用者報酬率排行、委託價偏離參考價 vs. 成交機率、各類別持股集中度、委託送出時段分布、瀏覽→下單轉換率（NoSQL） |
+| ≥ 10 個功能的 SQL（≥5 使用者／業務、≥5 分析，≥1 用到 NoSQL） | 業務：下單、取消、結算、庫存損益、行情（開盤價＋昨收推算）、凍結帳戶。分析：個股成交統計與委託成交率、使用者報酬率排行、委託價偏離參考價 vs. 成交機率、各類別持股集中度、委託送出時段分布、瀏覽→下單轉換率（NoSQL） |
 | Index 與效能比較 | `orders(belong_date) WHERE status='待成交'`（partial index，結算用）、`orders(user_id, submit_time DESC)`、`daily_price(trade_date)`、`security` 名稱搜尋用 `pg_trgm`。以 `EXPLAIN ANALYZE` 比較建立前後 |
 | 大量資料 | `DAILY_PRICE` 約 28 萬筆（真實，2026 起）；另生成約 2,000 名使用者、約 50 萬筆委託（**用同一套結算引擎在 2026 歷史行情上重播**，保證持股／成交／資金一致） |
 | GitHub + README + DB 備份 | `README.md`（安裝、啟動、測試帳號）、`backup/iminvestor.dump`（`pg_dump -Fc`）、Mongo `mongodump` |

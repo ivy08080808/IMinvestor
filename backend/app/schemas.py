@@ -90,12 +90,18 @@ class SecurityOut(BaseModel):
 
 
 class QuoteOut(BaseModel):
-    """Latest quote of one security. open_price = previous trading day's close."""
+    """Latest quote of one security.
+
+    open_price = TWSE's real opening price (stored).
+    prev_close = previous trading day's close (參考價／昨收, derived with LAG);
+    change / change_pct are relative to prev_close.
+    """
 
     security_id: str
     security_name: str
     category_name: str
     trade_date: Optional[date] = None
+    prev_close: Optional[Decimal] = None
     open_price: Optional[Decimal] = None
     high_price: Optional[Decimal] = None
     low_price: Optional[Decimal] = None
@@ -106,10 +112,15 @@ class QuoteOut(BaseModel):
 
 
 class PriceBarOut(BaseModel):
-    """One day of history. open_price = previous trading day's close (None on day 1)."""
+    """One day of history.
+
+    open_price = real opening price; prev_close = previous trading day's close
+    (None on the security's first day); change is relative to prev_close.
+    """
 
     trade_date: date
-    open_price: Optional[Decimal] = None
+    prev_close: Optional[Decimal] = None
+    open_price: Decimal
     high_price: Decimal
     low_price: Decimal
     close_price: Decimal

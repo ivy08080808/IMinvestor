@@ -69,7 +69,8 @@
 | GET | `/api/securities/{id}/history?from=&to=` | 歷史行情，新到舊，預設 90 天 | `PriceBarOut[]` | 🚧 |
 | GET | `/api/securities/{id}/order-rule` | 歸屬日、參考價、±10% 區間 | `OrderRuleOut` | ✅ |
 
-> `open_price`（開盤價）＝**前一交易日收盤價**，以 `LAG()` 推算，資料庫不存。
+> - `open_price`（開盤價）＝TWSE 當日**真實開盤價**，爬蟲匯入、存在 `DAILY_PRICE`。
+> - `prev_close`（昨收／參考價）＝**前一交易日收盤價**，以 `LAG()` 推算、不存；`change`、`change_pct`、±10% 下單限制、今日損益都以它為基準。
 
 ### 自選股（User）— 模組 C
 
@@ -122,9 +123,9 @@
   "price": "1050.00", "quantity": 100, "submit_time": "2026-11-19T10:15:00",
   "belong_date": "2026-11-19", "status": "待成交" }
 
-// QuoteOut  (open_price = previous close)
+// QuoteOut  (open_price = real open; prev_close = previous day's close, base of change)
 { "security_id": "2330", "security_name": "台積電", "category_name": "普通股",
-  "trade_date": "2026-11-18", "open_price": "1040.00", "high_price": "1060.00",
+  "trade_date": "2026-11-18", "prev_close": "1040.00", "open_price": "1045.00", "high_price": "1060.00",
   "low_price": "1035.00", "close_price": "1055.00", "volume": 25000000,
   "change": "15.00", "change_pct": "1.44" }
 

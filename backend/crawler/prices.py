@@ -35,9 +35,9 @@ def parse_mi_index(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
       最低價, 收盤價, ... (index by field name, not by position).
     * Strip thousands separators; skip rows whose close is "--" (no trade =
       suspended) or volume is 0 (violates ``volume > 0``).
-    * Return ``[{"security_id", "high_price", "low_price", "close_price",
-      "volume"}]`` with Decimal prices and int volume. Do NOT keep 開盤價
-      (plan §2: open is derived from the previous close).
+    * Return ``[{"security_id", "open_price", "high_price", "low_price",
+      "close_price", "volume"}]`` with Decimal prices and int volume
+      (開盤價 IS stored; the previous close / 參考價 is derived, plan §2).
     * ``payload["stat"] != "OK"`` (non-trading day / not published) -> ``[]``.
     """
     raise NotImplementedYet("解析每日收盤行情", OWNER_A)

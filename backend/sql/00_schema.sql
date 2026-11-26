@@ -63,18 +63,22 @@ CREATE TABLE trading_calendar (
     is_trading_day  boolean  NOT NULL
 );
 
--- NOTE: no open_price column by design. "開盤價" is displayed as the previous
--- trading day's close and derived with LAG() at query time (plan §2).
+-- open_price is TWSE's real opening price of that day.
+-- The reference price (參考價／昨收: base of change, ±10% limit, today's P&L)
+-- is NOT stored; it is the previous trading day's close, derived with
+-- LAG(close_price) at query time (plan §2).
 CREATE TABLE daily_price (
     security_id  varchar(10)    NOT NULL
                  REFERENCES security (security_id) ON DELETE RESTRICT ON UPDATE CASCADE,
     trade_date   date           NOT NULL
                  REFERENCES trading_calendar (calendar_date) ON DELETE RESTRICT ON UPDATE CASCADE,
+    open_price   numeric(10,2)  NOT NULL CHECK (open_price  > 0),
     high_price   numeric(10,2)  NOT NULL CHECK (high_price  > 0),
     low_price    numeric(10,2)  NOT NULL CHECK (low_price   > 0),
     close_price  numeric(10,2)  NOT NULL CHECK (close_price > 0),
     volume       bigint         NOT NULL CHECK (volume > 0),
     PRIMARY KEY (security_id, trade_date),
+    CHECK (low_price <= open_price  AND open_price  <= high_price),
     CHECK (low_price <= close_price AND close_price <= high_price)
 );
 

@@ -49,12 +49,13 @@ const QuoteTable = {
   setup() { return fmt; },
   template: `
     <table>
-      <thead><tr><th>代號</th><th>名稱</th><th>日期</th><th>開盤價(參考)</th><th>最高</th><th>最低</th>
+      <thead><tr><th>代號</th><th>名稱</th><th>日期</th><th>昨收(參考價)</th><th>開盤</th><th>最高</th><th>最低</th>
         <th>收盤</th><th>漲跌</th><th>幅度</th><th>成交量</th><th v-if="removable"></th></tr></thead>
       <tbody>
         <tr v-for="r in rows" :key="r.security_id">
           <td><a :href="'#/security/' + r.security_id">{{ r.security_id }}</a></td>
           <td>{{ r.security_name }}</td><td>{{ r.trade_date || '—' }}</td>
+          <td>{{ price(r.prev_close) }}</td>
           <td>{{ price(r.open_price) }}</td><td>{{ price(r.high_price) }}</td><td>{{ price(r.low_price) }}</td>
           <td>{{ price(r.close_price) }}</td>
           <td :class="trendClass(r.change)">{{ signed(r.change) }}</td>
@@ -62,7 +63,7 @@ const QuoteTable = {
           <td>{{ money(r.volume) }}</td>
           <td v-if="removable"><button class="link" @click="$emit('remove', r.security_id)">移除</button></td>
         </tr>
-        <tr v-if="!rows || !rows.length"><td colspan="11" class="muted">沒有資料</td></tr>
+        <tr v-if="!rows || !rows.length"><td colspan="12" class="muted">沒有資料</td></tr>
       </tbody>
     </table>`,
 };
@@ -91,7 +92,7 @@ export const MarketPage = {
       </form>
       <ErrorBox :error="error" />
       <QuoteTable :rows="rows" />
-      <p class="muted">開盤價（參考價）＝前一交易日收盤價；行情於每個交易日 15:00 自動更新。</p>
+      <p class="muted">顯示最新一個交易日的行情（含當日開盤價）；漲跌以昨收（參考價）為基準。行情於每個交易日 15:00 自動更新。</p>
     </div>`,
 };
 
@@ -120,7 +121,7 @@ export const SecurityPage = {
       <div class="card" v-if="quote.data.value">
         <span>收盤 <b :class="trendClass(quote.data.value.change)">{{ price(quote.data.value.close_price) }}</b></span>
         <span :class="trendClass(quote.data.value.change)"> {{ signed(quote.data.value.change) }} ({{ pct(quote.data.value.change_pct) }})</span>
-        <span class="muted">｜開盤價(參考) {{ price(quote.data.value.open_price) }}｜高 {{ price(quote.data.value.high_price) }}｜低 {{ price(quote.data.value.low_price) }}｜{{ quote.data.value.trade_date }}</span>
+        <span class="muted">｜昨收 {{ price(quote.data.value.prev_close) }}｜開 {{ price(quote.data.value.open_price) }}｜高 {{ price(quote.data.value.high_price) }}｜低 {{ price(quote.data.value.low_price) }}｜{{ quote.data.value.trade_date }}</span>
       </div>
       <OrderPanel v-if="isUser" :security-id="id" />
       <div class="card">
@@ -131,9 +132,9 @@ export const SecurityPage = {
         </form>
         <ErrorBox :error="history.error.value" />
         <table v-if="history.data.value">
-          <thead><tr><th>日期</th><th>開盤價(參考)</th><th>最高</th><th>最低</th><th>收盤</th><th>漲跌</th><th>幅度</th><th>成交量</th></tr></thead>
+          <thead><tr><th>日期</th><th>昨收(參考價)</th><th>開盤</th><th>最高</th><th>最低</th><th>收盤</th><th>漲跌</th><th>幅度</th><th>成交量</th></tr></thead>
           <tbody><tr v-for="b in history.data.value" :key="b.trade_date">
-            <td>{{ b.trade_date }}</td><td>{{ price(b.open_price) }}</td><td>{{ price(b.high_price) }}</td>
+            <td>{{ b.trade_date }}</td><td>{{ price(b.prev_close) }}</td><td>{{ price(b.open_price) }}</td><td>{{ price(b.high_price) }}</td>
             <td>{{ price(b.low_price) }}</td><td>{{ price(b.close_price) }}</td>
             <td :class="trendClass(b.change)">{{ signed(b.change) }}</td><td :class="trendClass(b.change)">{{ pct(b.change_pct) }}</td>
             <td>{{ money(b.volume) }}</td></tr></tbody>

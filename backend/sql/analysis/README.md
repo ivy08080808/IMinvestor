@@ -12,4 +12,4 @@
 | `a5_order_time_distribution.sql` | 委託送出時段分布（盤前／盤中／收盤後） | TODO |
 | （NoSQL）`behavior_log.view_to_order_conversion` | 瀏覽→下單轉換率 | TODO |
 
-參考價（開盤價）一律用 `LAG(close_price) OVER (PARTITION BY security_id ORDER BY trade_date)` 推算。
+參考價（昨收）一律用 `LAG(close_price) OVER (PARTITION BY security_id ORDER BY trade_date)` 推算；開盤價直接讀 `daily_price.open_price`。

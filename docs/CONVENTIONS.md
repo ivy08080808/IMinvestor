@@ -37,7 +37,8 @@ scheduler ──> jobs ──> crawler.prices.import_daily_prices  ──> settl
 ## 4. 回傳格式
 
 - service 回傳 `dict` / `list[dict]`，key 與 `app/schemas.py` 的 response model **完全一致**。
-- SQL 用 `AS` 把欄位命名成 schema 的 key（例如 `prev_close AS open_price`）。
+- SQL 用 `AS` 把欄位命名成 schema 的 key（例如 `LAG(close_price) OVER (...) AS prev_close`）。
+- `open_price`（真實開盤價，存在 DB）和 `prev_close`（昨收／參考價，LAG 推算）是兩個不同的值，不要混用。
 
 ## 5. 前端
 

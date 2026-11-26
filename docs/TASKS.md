@@ -17,11 +17,11 @@
 |---|---|---|
 | `crawler/securities.py` | `fetch_isin_list`, `sync_securities` | ISIN 頁面（Big5）→ SECURITY（`classify` 已完成） |
 | `crawler/holidays.py` | `ensure_weekdays`, `sync_holidays` | 交易日曆 |
-| `crawler/prices.py` | `parse_mi_index`, `import_daily_prices` | 每日行情；**15:00 排程呼叫的就是 `import_daily_prices`** |
+| `crawler/prices.py` | `parse_mi_index`, `import_daily_prices` | 每日行情（含開盤價）；**15:00 排程呼叫的就是 `import_daily_prices`** |
 | `scripts/backfill.py` | `main` | 2026-01-01 至今回補（約 15 分鐘） |
-| `app/services/quote_service.py` | `search_securities`, `get_quotes`, `get_history` | 開盤價 = LAG(前一日收盤) |
+| `app/services/quote_service.py` | `search_securities`, `get_quotes`, `get_history` | 開盤價讀 DB；昨收（參考價）= LAG(前一日收盤) |
 
-完成標準：`python -m scripts.backfill` 跑完、行情頁能查到 2330 的歷史與開盤價（參考價）。
+完成標準：`python -m scripts.backfill` 跑完、行情頁能查到 2330 的歷史行情，開盤價與昨收都正確。
 
 ## 模組 B：交易核心　負責人：＿＿＿
 

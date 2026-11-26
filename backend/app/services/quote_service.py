@@ -1,8 +1,13 @@
 """Securities search and quotes. Owner: 模組 A 行情與爬蟲.
 
-"開盤價" is NOT stored. It is the previous trading day's close, derived with
-``LAG(close_price) OVER (PARTITION BY security_id ORDER BY trade_date)``
-(plan §2). ``change = close - open``, ``change_pct = change / open × 100``.
+Two different "opening" numbers — do not mix them up (plan §2):
+
+* ``open_price`` — TWSE's real opening price, stored in DAILY_PRICE.
+* ``prev_close`` — 參考價／昨收 = previous trading day's close, NOT stored,
+  derived with ``LAG(close_price) OVER (PARTITION BY security_id ORDER BY trade_date)``.
+  ``change = close - prev_close``, ``change_pct = change / prev_close × 100``.
+  It is the same value as ``market.reference_price`` (±10% base) and the
+  base of "今日損益".
 """
 
 from __future__ import annotations
@@ -42,8 +47,8 @@ def get_quotes(conn: psycopg.Connection, security_ids: List[str]) -> List[Dict[s
     Suggested SQL — two latest rows per security via the PK, O(m log N)::
 
         SELECT s.security_id, s.security_name, c.category_name,
-               p.trade_date, p.high_price, p.low_price, p.close_price, p.volume,
-               p.prev_close AS open_price,
+               p.trade_date, p.prev_close, p.open_price,
+               p.high_price, p.low_price, p.close_price, p.volume,
                p.close_price - p.prev_close AS change,
                ROUND((p.close_price - p.prev_close) / p.prev_close * 100, 2) AS change_pct
         FROM security s
@@ -66,14 +71,14 @@ def get_history(
     """Daily bars between two dates, newest first. Returns ``PriceBarOut`` dicts.
 
     Compute LAG over the whole series *before* filtering by date, otherwise the
-    first day in the range gets ``open_price = NULL``::
+    first day in the range gets ``prev_close = NULL``::
 
-        SELECT trade_date, open_price, high_price, low_price, close_price, volume,
-               close_price - open_price AS change,
-               ROUND((close_price - open_price) / open_price * 100, 2) AS change_pct
+        SELECT trade_date, prev_close, open_price, high_price, low_price, close_price, volume,
+               close_price - prev_close AS change,
+               ROUND((close_price - prev_close) / prev_close * 100, 2) AS change_pct
         FROM (
-            SELECT trade_date, high_price, low_price, close_price, volume,
-                   LAG(close_price) OVER (ORDER BY trade_date) AS open_price
+            SELECT trade_date, open_price, high_price, low_price, close_price, volume,
+                   LAG(close_price) OVER (ORDER BY trade_date) AS prev_close
             FROM daily_price WHERE security_id = :sid
         ) t
         WHERE trade_date BETWEEN :from AND :to

@@ -120,7 +120,8 @@ def reference_price(
 ) -> Optional[Decimal]:
     """Close of the latest price strictly before ``belong`` (the ±10% base).
 
-    This is the same value the frontend shows as "開盤價（參考價）" on ``belong``.
+    This is the same value the quote API returns as ``prev_close``
+    (參考價／昨收) for ``belong``. It is NOT the stored ``open_price``.
     Returns ``None`` if the security has no price yet (orders not allowed).
     """
     row = conn.execute(
