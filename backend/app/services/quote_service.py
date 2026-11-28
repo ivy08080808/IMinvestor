@@ -19,8 +19,11 @@ import psycopg
 
 from app import clock, fees, market
 from app.constants import SECURITY_ACTIVE
-from app.errors import AppError, NotImplementedYet
-from app.services import OWNER_A
+from app.errors import AppError
+
+
+def _escape_like(keyword: str) -> str:
+    return keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def search_securities(conn: psycopg.Connection, keyword: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -28,24 +31,31 @@ def search_securities(conn: psycopg.Connection, keyword: str, limit: int = 20) -
 
     Returns: list of ``SecurityOut`` dicts. Only status = '啟用' (report: disabled
     securities are hidden from users).
-
-    Suggested SQL (uses PK for the id prefix and idx_security_name_trgm)::
-
+    """
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+    return conn.execute(
+        """
         SELECT s.security_id, s.security_name, s.category_id, c.category_name, s.status
         FROM security s JOIN security_category c USING (category_id)
-        WHERE s.status = '啟用'
-          AND (s.security_id LIKE :kw || '%' OR s.security_name ILIKE '%' || :kw || '%')
-        ORDER BY (s.security_id = :kw) DESC, s.security_id
-        LIMIT :limit;
-    """
-    raise NotImplementedYet("搜尋證券", OWNER_A)
+        WHERE s.status = %(active)s
+          AND (s.security_id LIKE %(like)s || '%%'
+               OR s.security_name ILIKE '%%' || %(like)s || '%%')
+        ORDER BY (s.security_id = %(kw)s) DESC, s.security_id
+        LIMIT %(limit)s
+        """,
+        {"active": SECURITY_ACTIVE, "like": _escape_like(kw), "kw": kw, "limit": limit},
+    ).fetchall()
 
 
 def get_quotes(conn: psycopg.Connection, security_ids: List[str]) -> List[Dict[str, Any]]:
-    """Latest quote for each id (watchlist, market list). Returns ``QuoteOut`` dicts.
-
-    Suggested SQL — two latest rows per security via the PK, O(m log N)::
-
+    """Latest quote for each id (watchlist, market list). Returns ``QuoteOut`` dicts."""
+    ids = list(dict.fromkeys(security_ids))  # 去重並保留順序
+    if not ids:
+        return []
+    rows = conn.execute(
+        """
         SELECT s.security_id, s.security_name, c.category_name,
                p.trade_date, p.prev_close, p.open_price,
                p.high_price, p.low_price, p.close_price, p.volume,
@@ -60,9 +70,12 @@ def get_quotes(conn: psycopg.Connection, security_ids: List[str]) -> List[Dict[s
                   ORDER BY dp.trade_date DESC LIMIT 2) d
             ORDER BY d.trade_date DESC LIMIT 1
         ) p ON true
-        WHERE s.security_id = ANY(:ids);
-    """
-    raise NotImplementedYet("查詢最新行情", OWNER_A)
+        WHERE s.security_id = ANY(%s)
+        """,
+        (ids,),
+    ).fetchall()
+    order = {sid: i for i, sid in enumerate(ids)}
+    return sorted(rows, key=lambda r: order.get(r["security_id"], len(order)))
 
 
 def get_history(
@@ -70,21 +83,24 @@ def get_history(
 ) -> List[Dict[str, Any]]:
     """Daily bars between two dates, newest first. Returns ``PriceBarOut`` dicts.
 
-    Compute LAG over the whole series *before* filtering by date, otherwise the
-    first day in the range gets ``prev_close = NULL``::
-
+    LAG is computed over the whole series *before* filtering by date, otherwise
+    the first day in the range would get ``prev_close = NULL``.
+    """
+    return conn.execute(
+        """
         SELECT trade_date, prev_close, open_price, high_price, low_price, close_price, volume,
                close_price - prev_close AS change,
                ROUND((close_price - prev_close) / prev_close * 100, 2) AS change_pct
         FROM (
             SELECT trade_date, open_price, high_price, low_price, close_price, volume,
                    LAG(close_price) OVER (ORDER BY trade_date) AS prev_close
-            FROM daily_price WHERE security_id = :sid
+            FROM daily_price WHERE security_id = %s
         ) t
-        WHERE trade_date BETWEEN :from AND :to
-        ORDER BY trade_date DESC;
-    """
-    raise NotImplementedYet("歷史行情", OWNER_A)
+        WHERE trade_date BETWEEN %s AND %s
+        ORDER BY trade_date DESC
+        """,
+        (security_id, date_from, date_to),
+    ).fetchall()
 
 
 def get_order_rule(conn: psycopg.Connection, security_id: str) -> Dict[str, Any]:
